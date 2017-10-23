@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:camel="http://camel.apache.org/schema/spring"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd        http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+    <bean class="com.dlt.demo.iot.datacenter.ocp.fis.MyJettyService" id="myJettyProcessor"/>
+    <!-- Define a traditional camel context here -->
+    <camelContext id="camel" xmlns="http://camel.apache.org/schema/spring">
+        <route id="datacenter_receive">
+            <from id="_from1" uri="activemq:queue:message.to.datacenter"/>
+            <log id="_log1" message="${body}"/>
+            <setHeader headerName="DashboardEnabled" id="_setHeader1">
+                <simple>${sysenv.INFLUXDASHBOARD}</simple>
+            </setHeader>
+            <choice id="Check_Dashboard_Variable">
+                <when id="_when1">
+                    <simple>${header.DashboardEnabled} == "TRUE"</simple>
+                    <setHeader headerName="routeList" id="_setHeader2">
+                        <constant>direct:Monitoring,direct:sendToInfluxDB</constant>
+                    </setHeader>
+                </when>
+                <otherwise id="_otherwise1">
+                    <setHeader headerName="routeList" id="_setHeader3">
+                        <constant>direct:Monitoring</constant>
+                    </setHeader>
+                </otherwise>
+            </choice>
+            <recipientList id="_recipientList1">
+                <header>routeList</header>
+            </recipientList>
+        </route>
+        <route id="Monitoring">
+            <from id="_from2" uri="direct:Monitoring"/>
+            <log id="_log2" message="Message will be sent to BRMS Decision Server"/>
+            <log id="_log3" message="${body}"/>
+            <to id="_to1" uri="activemq:queue:message.to.rules"/>
+        </route>
+        <route id="backToSmartGateway">
+            <from id="_from3" uri="jetty:http://0.0.0.0:4711/lightsOff?matchOnUriPrefix=true"/>
+            <process id="_process1" ref="myJettyProcessor"/>
+            <log id="_log4" message="Received message to be forwarded to Gateway: ${body} "/>
+            <to id="_to2" pattern="InOnly" uri="activemq:queue:message.back.to.gateway"/>
+        </route>
+        <route id="influxDB">
+            <from id="_from4" uri="direct:sendToInfluxDB?exchangePattern=InOnly"/>
+            <unmarshal id="_unmarshal1">
+                <jaxb contextPath="com.dlt.demo.iot.datacenter.ocp.fis"/>
+            </unmarshal>
+            <setHeader headerName="Exchange.CONTENT_TYPE" id="_setHeader4">
+                <constant>application/x-binary</constant>
+            </setHeader>
+            <setHeader headerName="CamelHttpMethod" id="_setHeader5">
+                <constant>POST</constant>
+            </setHeader>
+            <setHeader headerName="deviceType" id="_setHeader6">
+                <simple>${body.deviceType}</simple>
+            </setHeader>
+            <setHeader headerName="deviceID" id="_setHeader7">
+                <simple>${body.deviceID}</simple>
+            </setHeader>
+            <setHeader headerName="payload" id="_setHeader8">
+                <simple>${body.payload}</simple>
+            </setHeader>
+            <setBody id="SetInformationBody">
+                <simple>events.stats.${header.deviceType},deviceType=${header.deviceType},deviceID=${header.deviceID} payload=${header.payload}</simple>
+            </setBody>
+            <toD id="sendDataToInfluxDB" uri="http4://${sysenv.INFLUXHOST}:${sysenv.INFLUXPORT}/${sysenv.INFLUXURI}"/>
+        </route>
+    </camelContext>
+</beans>
